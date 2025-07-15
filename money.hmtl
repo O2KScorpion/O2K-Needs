@@ -1,0 +1,160 @@
+// Run with: npm install express stripe cors
+// Then: node app.js
+
+const express = require('express');
+const app = express();
+const stripe = require('stripe')('YOUR_STRIPE_SECRET_KEY'); // replace this
+const cors = require('cors');
+const path = require('path');
+
+app.use(cors());
+app.use(express.json());
+
+// Serve the frontend HTML at root
+app.get('/', (req, res) => {
+  res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Shop with Stripe</title>
+  <script src="https://js.stripe.com/v3/"></script>
+  <style>
+    body { font-family: Arial; background: #9ACD32; margin: 0; padding: 0; }
+    header, footer { text-align: center; padding: 1rem; background: #333; color: white; }
+    #product-list { display: flex; justify-content: center; gap: 20px; padding: 20px; }
+    .product { background: white; padding: 15px; width: 200px; text-align: center; }
+    button { background: #28a745; border: none; padding: 10px; color: white; cursor: pointer; }
+    button:hover { background: #218838; }
+    #cart { position: fixed; top: 60px; right: 0; width: 300px; background: white; padding: 20px; box-shadow: -2px 0 10px rgba(0,0,0,0.2); display: none; max-height: calc(100vh - 70px); overflow-y: auto; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>O2K_DGS Shop</h1>
+    <button id="cart-btn" onclick="toggleCart()">Cart (0)</button>
+  </header>
+
+  <div id="product-list">
+    <div class="product">
+      <h2>Electric</h2>
+      <p>$24.99</p>
+      <button onclick="addToCart('Electric', 24.99)">Add to Cart</button>
+    </div>
+    <div class="product">
+      <h2>Manual</h2>
+      <p>$29.99</p>
+      <button onclick="addToCart('Manual', 29.99)">Add to Cart</button>
+    </div>
+    <div class="product">
+      <h2>Other</h2>
+      <p>$34.99</p>
+      <button onclick="addToCart('Other', 34.99)">Add to Cart</button>
+    </div>
+  </div>
+
+  <div id="cart">
+    <h2>Your Cart</h2>
+    <ul id="cart-items"></ul>
+    <p>Total: $<span id="total-price">0.00</span></p>
+    <button id="checkout-btn" onclick="checkout()">Proceed to Checkout</button>
+  </div>
+
+  <footer>
+    NO ONLINE PAYMENTS, BRING CASH
+    <div>Contact @ScorpionO²K_GANG for info</div>
+  </footer>
+
+  <script>
+    const stripe = Stripe('YOUR_STRIPE_PUBLISHABLE_KEY'); // replace this
+    let cart = [];
+    let totalPrice = 0;
+
+    function addToCart(name, price) {
+      cart.push({ name, price });
+      totalPrice += price;
+      updateCartDisplay();
+    }
+
+    function updateCartDisplay() {
+      const cartItems = document.getElementById('cart-items');
+      cartItems.innerHTML = '';
+      cart.forEach(item => {
+        const li = document.createElement('li');
+        li.textContent = \`\${item.name} - $\${item.price.toFixed(2)}\`;
+        cartItems.appendChild(li);
+      });
+      document.getElementById('total-price').textContent = totalPrice.toFixed(2);
+      document.getElementById('cart-btn').textContent = \`Cart (\${cart.length})\`;
+    }
+
+    function toggleCart() {
+      const cartEl = document.getElementById('cart');
+      cartEl.style.display = cartEl.style.display === 'block' ? 'none' : 'block';
+    }
+
+    async function checkout() {
+      if (cart.length === 0) {
+        alert('Cart is empty!');
+        return;
+      }
+
+      const lineItems = cart.map(item => ({
+        price_data: {
+          currency: 'usd',
+          product_data: { name: item.name },
+          unit_amount: Math.round(item.price * 100),
+        },
+        quantity: 1,
+      }));
+
+      try {
+        const response = await fetch('/create-checkout-session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ lineItems }),
+        });
+
+        const session = await response.json();
+
+        const result = await stripe.redirectToCheckout({ sessionId: session.id });
+
+        if (result.error) {
+          alert(result.error.message);
+        }
+      } catch (err) {
+        alert('Checkout failed, try again.');
+        console.error(err);
+      }
+    }
+  </script>
+</body>
+</html>`);
+});
+
+app.post('/create-checkout-session', async (req, res) => {
+  try {
+    const lineItems = req.body.lineItems;
+    const session = await stripe.checkout.sessions.create({
+      payment_method_types: ['card'],
+      line_items: lineItems,
+      mode: 'payment',
+      success_url: 'http://localhost:3000/success',
+      cancel_url: 'http://localhost:3000/cancel',
+    });
+    res.json({ id: session.id });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Simple success and cancel pages
+app.get('/success', (req, res) => {
+  res.send('<h1>Payment Success! Thanks for your order.</h1>');
+});
+
+app.get('/cancel', (req, res) => {
+  res.send('<h1>Payment Cancelled. You can try again.</h1>');
+});
+
+app.listen(3000, () => console.log('Running on http://localhost:3000'));
